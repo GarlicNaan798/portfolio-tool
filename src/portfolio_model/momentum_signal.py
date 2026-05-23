@@ -9,69 +9,25 @@ from pathlib import Path
 from portfolio_model.alpaca import AlpacaApiError, AlpacaClient, AlpacaConfigError
 from portfolio_model.backtest import (
     PriceBar,
-    clamp,
     common_calendar,
     fetch_sp500_sectors,
     load_or_fetch_bars,
     price_table,
-    quality_proxy_score,
     rank_symbols,
     risk_weights,
     select_candidates,
     strategy_features,
-    trailing_volatility,
 )
 from portfolio_model.env import load_dotenv
+from portfolio_model.momentum_execution import execute_paper_plan, execution_error_rows, write_order_results
+from portfolio_model.momentum_journal import (
+    build_decision_journal,
+    merge_orders_into_journal,
+    merge_plan_into_journal,
+    write_decision_journal,
+)
 
 
-DECISION_JOURNAL_FIELDS = [
-    "run_date",
-    "signal_date",
-    "agent",
-    "symbol",
-    "rank",
-    "sector",
-    "decision",
-    "reason",
-    "regime_on",
-    "spy_close",
-    "spy_ma50",
-    "spy_ma200",
-    "spy_3m_momentum",
-    "score",
-    "score_formula",
-    "momentum_12m",
-    "momentum_6m",
-    "momentum_3m",
-    "drawdown",
-    "volatility",
-    "reward_to_risk",
-    "mom6_component",
-    "mom3_component",
-    "near_high_component",
-    "quality_component",
-    "weighted_mom6",
-    "weighted_mom3",
-    "weighted_near_high",
-    "weighted_quality",
-    "min_score",
-    "max_positions",
-    "sector_cap",
-    "effective_sector_cap",
-    "correlation_cap",
-    "volatility_target",
-    "risk_weight_formula",
-    "trailing_volatility_for_weight",
-    "raw_weight_numerator",
-    "strategy_sleeve_weight",
-    "plan_action",
-    "target_notional",
-    "current_notional",
-    "delta_notional",
-    "order_status",
-    "order_id",
-    "order_reason",
-]
 DEFAULT_IGNORED_UNMANAGED_SYMBOLS = {"CBOE", "VRNS", "DRIO"}
 
 
@@ -201,7 +157,6 @@ def generate_signal(args: argparse.Namespace) -> dict[str, object]:
         selected_symbols=selected_symbols,
         weights=weights,
         bars=bars,
-        prices=prices,
         sectors=sectors,
         signal_date=signal_date,
         run_date=end,
@@ -454,310 +409,6 @@ def build_paper_plan(
     return rows
 
 
-def build_decision_journal(
-    ranked: list[tuple[str, float]],
-    *,
-    selected_symbols: set[str],
-    weights: dict[str, float],
-    bars: dict[str, list[PriceBar]],
-    prices: dict[str, dict[date, float]],
-    sectors: dict[str, str],
-    signal_date: date,
-    run_date: date,
-    regime: dict[str, str],
-    context: dict[str, float],
-    max_rows: int,
-) -> list[dict[str, str]]:
-    rows = []
-    selected_count_by_sector: dict[str, int] = {}
-    for symbol in selected_symbols:
-        sector = sectors.get(symbol, "Unknown")
-        selected_count_by_sector[sector] = selected_count_by_sector.get(sector, 0) + 1
-
-    for rank, (symbol, score) in enumerate(ranked[:max_rows], start=1):
-        features = strategy_features(bars[symbol], signal_date)
-        if features is None:
-            continue
-        components = momentum_score_components(features)
-        selected = symbol in selected_symbols
-        sector = sectors.get(symbol, "Unknown")
-        weight = weights.get(symbol, 0.0)
-        vol = trailing_volatility(bars[symbol], signal_date)
-        raw_weight_numerator = max(score - 5.0, 0.01) / max(vol, 0.08)
-        decision = "SELECTED" if selected else "REJECTED"
-        reason = selection_reason(
-            rank=rank,
-            score=score,
-            selected=selected,
-            sector=sector,
-            selected_count_by_sector=selected_count_by_sector,
-            context=context,
-        )
-        rows.append(
-            {
-                "run_date": run_date.isoformat(),
-                "signal_date": signal_date.isoformat(),
-                "agent": "momentum_breakout",
-                "symbol": symbol,
-                "rank": str(rank),
-                "sector": sector,
-                "decision": decision,
-                "reason": reason,
-                "regime_on": regime.get("regime_on", ""),
-                "spy_close": regime.get("spy_close", ""),
-                "spy_ma50": regime.get("spy_ma50", ""),
-                "spy_ma200": regime.get("spy_ma200", ""),
-                "spy_3m_momentum": regime.get("spy_3m_momentum", ""),
-                "score": f"{score:.4f}",
-                "score_formula": (
-                    "10*(0.40*mom6_component + 0.30*mom3_component + "
-                    "0.20*near_high_component + 0.10*quality_component)"
-                ),
-                "momentum_12m": f"{features.momentum_12m:.4f}",
-                "momentum_6m": f"{features.momentum_6m:.4f}",
-                "momentum_3m": f"{features.momentum_3m:.4f}",
-                "drawdown": f"{features.drawdown:.4f}",
-                "volatility": f"{features.volatility:.4f}",
-                "reward_to_risk": f"{features.reward_to_risk:.4f}",
-                "mom6_component": f"{components['mom6_component']:.4f}",
-                "mom3_component": f"{components['mom3_component']:.4f}",
-                "near_high_component": f"{components['near_high_component']:.4f}",
-                "quality_component": f"{components['quality_component']:.4f}",
-                "weighted_mom6": f"{components['weighted_mom6']:.4f}",
-                "weighted_mom3": f"{components['weighted_mom3']:.4f}",
-                "weighted_near_high": f"{components['weighted_near_high']:.4f}",
-                "weighted_quality": f"{components['weighted_quality']:.4f}",
-                "min_score": f"{context['min_score']:.4f}",
-                "max_positions": f"{context['max_positions']:.0f}",
-                "sector_cap": f"{context['sector_cap']:.4f}",
-                "effective_sector_cap": f"{context['effective_sector_cap']:.4f}",
-                "correlation_cap": f"{context['correlation_cap']:.4f}",
-                "volatility_target": f"{context['volatility_target']:.4f}",
-                "risk_weight_formula": "max(score-5,0.01)/max(trailing_volatility,0.08), normalized to volatility target",
-                "trailing_volatility_for_weight": f"{vol:.4f}",
-                "raw_weight_numerator": f"{raw_weight_numerator:.6f}",
-                "strategy_sleeve_weight": f"{weight:.4f}",
-                "plan_action": "",
-                "target_notional": "",
-                "current_notional": "",
-                "delta_notional": "",
-                "order_status": "",
-                "order_id": "",
-                "order_reason": "",
-            }
-        )
-    if not rows:
-        rows.append(empty_decision_journal_row(run_date, signal_date, regime, "No ranked symbols; regime may be off."))
-    return rows
-
-
-def momentum_score_components(features) -> dict[str, float]:
-    mom6 = (clamp(features.momentum_6m, -0.10, 0.60) + 0.10) / 0.70
-    mom3 = (clamp(features.momentum_3m, -0.05, 0.35) + 0.05) / 0.40
-    near_high = 1.0 - clamp(abs(features.drawdown), 0.0, 0.20) / 0.20
-    quality = quality_proxy_score(features)
-    return {
-        "mom6_component": mom6,
-        "mom3_component": mom3,
-        "near_high_component": near_high,
-        "quality_component": quality,
-        "weighted_mom6": 0.40 * mom6,
-        "weighted_mom3": 0.30 * mom3,
-        "weighted_near_high": 0.20 * near_high,
-        "weighted_quality": 0.10 * quality,
-    }
-
-
-def selection_reason(
-    *,
-    rank: int,
-    score: float,
-    selected: bool,
-    sector: str,
-    selected_count_by_sector: dict[str, int],
-    context: dict[str, float],
-) -> str:
-    if selected:
-        return "Selected: passed regime gate, min score, max positions, sector/correlation filters, and risk sizing."
-    if score < context["min_score"]:
-        return f"Rejected: score {score:.2f} below min_score {context['min_score']:.2f}."
-    if rank > context["max_positions"]:
-        sector_note = ""
-        if context["effective_sector_cap"] < 1.0 and selected_count_by_sector.get(sector, 0) > 0:
-            sector_note = f" Sector {sector} already represented among selected names."
-        return f"Rejected: rank {rank} outside max_positions {context['max_positions']:.0f}.{sector_note}"
-    return "Rejected by diversification filters or duplicate exposure grouping."
-
-
-def merge_plan_into_journal(journal_rows: list[dict[str, str]], plan_rows: list[dict[str, str]]) -> None:
-    plan_by_symbol = {row.get("symbol", ""): row for row in plan_rows}
-    for row in journal_rows:
-        plan = plan_by_symbol.get(row.get("symbol", ""))
-        if not plan:
-            continue
-        row["plan_action"] = plan.get("action", "")
-        row["target_notional"] = plan.get("target_notional", "")
-        row["current_notional"] = plan.get("current_notional", "")
-        row["delta_notional"] = plan.get("delta_notional", "")
-
-
-def merge_orders_into_journal(journal_rows: list[dict[str, str]], order_rows: list[dict[str, str]]) -> None:
-    orders_by_symbol = {row.get("symbol", ""): row for row in order_rows}
-    for row in journal_rows:
-        order = orders_by_symbol.get(row.get("symbol", ""))
-        if not order:
-            continue
-        row["order_status"] = order.get("status", "")
-        row["order_id"] = order.get("order_id", "")
-        row["order_reason"] = order.get("reason", "")
-
-
-def empty_decision_journal_row(run_date: date, signal_date: date, regime: dict[str, str], reason: str) -> dict[str, str]:
-    return {field: "" for field in DECISION_JOURNAL_FIELDS} | {
-        "run_date": run_date.isoformat(),
-        "signal_date": signal_date.isoformat(),
-        "agent": "momentum_breakout",
-        "decision": "NO_ACTION",
-        "reason": reason,
-        "regime_on": regime.get("regime_on", ""),
-        "spy_close": regime.get("spy_close", ""),
-        "spy_ma50": regime.get("spy_ma50", ""),
-        "spy_ma200": regime.get("spy_ma200", ""),
-        "spy_3m_momentum": regime.get("spy_3m_momentum", ""),
-    }
-
-
-def execute_paper_plan(
-    plan_rows: list[dict[str, str]],
-    *,
-    run_date: date,
-    max_order_notional: float,
-    client: AlpacaClient | None = None,
-) -> list[dict[str, str]]:
-    client = client or AlpacaClient()
-    if "paper-api.alpaca.markets" not in client.config.base_url:
-        raise RuntimeError(f"Refusing to execute momentum plan against non-paper Alpaca URL: {client.config.base_url}")
-    if not paper_execution_enabled():
-        raise RuntimeError("Refusing to execute: set PORTFOLIO_DRY_RUN=false and pass --execute-paper.")
-
-    account = client.account()
-    positions = {str(position.get("symbol", "")).upper(): position for position in client.positions()}
-    open_buy_symbols = {
-        str(order.get("symbol", "")).upper()
-        for order in client.orders(status="open", limit=100)
-        if str(order.get("side", "")).lower() == "buy"
-    }
-    open_sell_symbols = {
-        str(order.get("symbol", "")).upper()
-        for order in client.orders(status="open", limit=100)
-        if str(order.get("side", "")).lower() == "sell"
-    }
-    buying_power = parse_float(account.get("buying_power")) or parse_float(account.get("cash"))
-    results = []
-    for row in plan_rows:
-        symbol = row.get("symbol", "").upper()
-        action = row.get("action", "")
-        delta_notional = parse_float(row.get("delta_notional"))
-        requested = abs(delta_notional) if action == "SELL" else max(0.0, delta_notional)
-        submitted = min(requested, max_order_notional)
-        result = {
-            "run_date": run_date.isoformat(),
-            "signal_date": row.get("signal_date", ""),
-            "symbol": symbol,
-            "plan_action": action,
-            "requested_notional": f"{requested:.2f}",
-            "submitted_notional": "0.00",
-            "status": "SKIPPED",
-            "order_id": "",
-            "reason": "",
-        }
-        if action not in {"BUY", "SELL"}:
-            result["reason"] = f"plan action {action or '<blank>'} is not executable"
-        elif not symbol:
-            result["reason"] = "missing symbol"
-        elif action == "BUY" and symbol in open_buy_symbols:
-            result["reason"] = "open buy order already exists"
-        elif action == "SELL" and symbol in open_sell_symbols:
-            result["reason"] = "open sell order already exists"
-        elif action == "SELL" and symbol not in positions:
-            result["reason"] = "no held position to sell"
-        elif action == "SELL" and parse_float(positions.get(symbol, {}).get("market_value")) <= 0:
-            result["reason"] = "position market value is non-positive; skipping sell"
-        elif action == "BUY" and submitted > buying_power:
-            result["reason"] = "buying power below requested notional"
-        elif submitted < 1.0:
-            result["reason"] = "requested notional below $1"
-        else:
-            try:
-                response = client.submit_market_order(
-                    symbol=symbol,
-                    side="buy" if action == "BUY" else "sell",
-                    notional=submitted,
-                    client_order_id=f"momentum-{symbol.lower()}-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}",
-                )
-            except (AlpacaApiError, OSError) as exc:
-                result["status"] = "REJECTED"
-                result["reason"] = str(exc)
-            else:
-                result["submitted_notional"] = f"{submitted:.2f}"
-                result["status"] = str(response.get("status") or "SUBMITTED").upper()
-                result["order_id"] = str(response.get("id", ""))
-                result["reason"] = "submitted to Alpaca paper"
-                if action == "BUY":
-                    buying_power = max(0.0, buying_power - submitted)
-                    open_buy_symbols.add(symbol)
-                else:
-                    open_sell_symbols.add(symbol)
-        if symbol in positions and result["status"] == "SKIPPED" and not result["reason"]:
-            result["reason"] = "position already held"
-        results.append(result)
-    return results
-
-
-def execution_error_rows(
-    plan_rows: list[dict[str, str]],
-    run_date: date,
-    exc: Exception,
-) -> list[dict[str, str]]:
-    reason = f"execution unavailable before order submission: {exc}"
-    rows = []
-    for row in plan_rows:
-        rows.append(
-            {
-                "run_date": run_date.isoformat(),
-                "signal_date": row.get("signal_date", ""),
-                "symbol": row.get("symbol", ""),
-                "plan_action": row.get("action", ""),
-                "requested_notional": f"{abs(parse_float(row.get('delta_notional'))):.2f}",
-                "submitted_notional": "0.00",
-                "status": "EXECUTION_ERROR",
-                "order_id": "",
-                "reason": reason,
-            }
-        )
-    if not rows:
-        rows.append(
-            {
-                "run_date": run_date.isoformat(),
-                "signal_date": "",
-                "symbol": "",
-                "plan_action": "",
-                "requested_notional": "0.00",
-                "submitted_notional": "0.00",
-                "status": "EXECUTION_ERROR",
-                "order_id": "",
-                "reason": reason,
-            }
-        )
-    return rows
-
-
-def paper_execution_enabled() -> bool:
-    import os
-
-    return os.getenv("PORTFOLIO_DRY_RUN", "true").lower() == "false"
-
-
 def trade_action(delta: float, min_trade_notional: float) -> str:
     if delta >= min_trade_notional:
         return "BUY"
@@ -844,37 +495,6 @@ def write_paper_plan(output_dir: Path, rows: list[dict[str, str]], run_date: dat
     ]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-    return path
-
-
-def write_order_results(output_dir: Path, rows: list[dict[str, str]], run_date: date) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"momentum_order_results_{run_date.isoformat().replace('-', '')}.csv"
-    fields = [
-        "run_date",
-        "signal_date",
-        "symbol",
-        "plan_action",
-        "requested_notional",
-        "submitted_notional",
-        "status",
-        "order_id",
-        "reason",
-    ]
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        writer.writerows(rows)
-    return path
-
-
-def write_decision_journal(output_dir: Path, rows: list[dict[str, str]], run_date: date) -> Path:
-    output_dir.mkdir(parents=True, exist_ok=True)
-    path = output_dir / f"momentum_decision_journal_{run_date.isoformat().replace('-', '')}.csv"
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=DECISION_JOURNAL_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
     return path

@@ -6,7 +6,6 @@ import os
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
 
@@ -26,31 +25,13 @@ from portfolio_model.execution_coordinator import (
     record_execution_plan,
 )
 from portfolio_model.exit_manager import execute_exit_plan, run_exit_manager
+from portfolio_model.industry_types import IndustryAgentResult, IndustryAgentSpec
 from portfolio_model.model import PortfolioDecision
 from portfolio_model.opportunity import opportunity_components, opportunity_score, predicted_return_pct
 from portfolio_model.portfolio_state import sync_alpaca_portfolio
 from portfolio_model.preopen import execute_at_open, market_clock
 from portfolio_model.research_memory import record_research_cycle
 from portfolio_model.scout import OpportunityScout, ScoutConfig
-
-
-@dataclass(frozen=True)
-class IndustryAgentSpec:
-    name: str
-    display_name: str
-    industry: str
-    symbols: tuple[str, ...]
-
-
-@dataclass(frozen=True)
-class IndustryAgentResult:
-    spec: IndustryAgentSpec
-    decisions: list[PortfolioDecision]
-    researched: int
-    skipped: int
-    errors: list[str]
-    warnings: list[str]
-
 
 def main() -> None:
     load_dotenv(Path(".env"))

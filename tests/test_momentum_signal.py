@@ -6,10 +6,9 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from portfolio_model.backtest import PriceBar
+from portfolio_model.momentum_execution import execute_paper_plan, execution_error_rows
 from portfolio_model.momentum_signal import (
     build_paper_plan,
-    execute_paper_plan,
-    execution_error_rows,
     load_cached_bars,
     trade_action,
 )
