@@ -1,0 +1,9 @@
+[project]
+name = "portfolio-tool"
+version = "0.1.0"
+description = "Medium-horizon equity scoring model using fundamentals, industry-relative value, growth, and sentiment."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+portfolio-model = "portfolio_model.cli:main"
