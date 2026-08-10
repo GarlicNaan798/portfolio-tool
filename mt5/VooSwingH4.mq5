@@ -20,8 +20,12 @@
 input int    MomentumLookbackDays = 63;    // J: 63=3mo, 126=6mo, 189=9mo, 252=12mo
 input bool   UseSMA200Filter      = true;  // also require D1 close > SMA(200)
 
-//--- entry timing (H4, from the thesis) ---
-input int    MaPeriod             = 50;    // H4 MA; price must be below it to buy
+//--- entry timing (from the thesis) ---
+// Set EntryTF to whatever bars you actually imported. PERIOD_D1 here makes
+// this the thesis's original daily strategy, which is the only config with
+// enough free VOO history to be worth believing.
+input ENUM_TIMEFRAMES EntryTF     = PERIOD_H4;
+input int    MaPeriod             = 50;    // entry-TF MA; price must be below it to buy
 input int    RsiPeriod            = 14;
 input double RsiOversold          = 35.0;  // buy when RSI crosses back up through this
 input double RsiOverbought        = 70.0;  // thesis sell signal
@@ -30,7 +34,10 @@ input double RsiOverbought        = 70.0;  // thesis sell signal
 input int    AtrPeriod            = 14;
 input double AtrStopMult          = 2.0;
 input double AtrTargetMult        = 0.0;   // 0 = no fixed target
-input int    MaxBarsInTrade       = 150;   // ~5 weeks of H4 bars on a 24h symbol; 0 = off
+// Bars, not days - so it must track the symbol's bars/day. A 24h CFD gives
+// 6 H4 bars/day (150 = ~5 weeks); cash VOO gives 1.99, so use ~50 there.
+// export_voo.py prints the right number for whatever you import.
+input int    MaxBarsInTrade       = 150;   // ~5-week hold; 0 = off
 input bool   UseRsiExit           = true;
 
 //--- risk ---
@@ -105,9 +112,9 @@ int OnInit()
    if(!SelfCheck())
       return INIT_FAILED;
 
-   hMaH4 = iMA(_Symbol, PERIOD_H4, MaPeriod, 0, MODE_SMA, PRICE_CLOSE);
-   hRsi  = iRSI(_Symbol, PERIOD_H4, RsiPeriod, PRICE_CLOSE);
-   hAtr  = iATR(_Symbol, PERIOD_H4, AtrPeriod);
+   hMaH4 = iMA(_Symbol, EntryTF, MaPeriod, 0, MODE_SMA, PRICE_CLOSE);
+   hRsi  = iRSI(_Symbol, EntryTF, RsiPeriod, PRICE_CLOSE);
+   hAtr  = iATR(_Symbol, EntryTF, AtrPeriod);
    hMaD1 = iMA(_Symbol, PERIOD_D1, 200, 0, MODE_SMA, PRICE_CLOSE);
 
    if(hMaH4 == INVALID_HANDLE || hRsi == INVALID_HANDLE ||
@@ -172,7 +179,7 @@ void ManageOpenPosition(double rsiPrev, double rsiNow)
    if(MaxBarsInTrade > 0)
    {
       datetime opened = (datetime)PositionGetInteger(POSITION_TIME);
-      int held = iBarShift(_Symbol, PERIOD_H4, opened, false);
+      int held = iBarShift(_Symbol, EntryTF, opened, false);
       if(held >= MaxBarsInTrade)
       {
          trade.PositionClose(_Symbol);
@@ -192,7 +199,7 @@ void ManageOpenPosition(double rsiPrev, double rsiNow)
 //+------------------------------------------------------------------+
 void TryEntry(int dir, double rsiPrev, double rsiNow, double ma, double atr)
 {
-   double close = iClose(_Symbol, PERIOD_H4, 1);
+   double close = iClose(_Symbol, EntryTF, 1);
    if(close <= 0 || atr <= 0)
       return;
 
@@ -238,7 +245,7 @@ void OnTick()
 {
    // Act once per closed H4 bar. Everything below reads shift 1, so no
    // decision ever uses a bar that is still forming.
-   datetime bt = iTime(_Symbol, PERIOD_H4, 0);
+   datetime bt = iTime(_Symbol, EntryTF, 0);
    if(bt == lastBar || bt == 0)
       return;
    lastBar = bt;

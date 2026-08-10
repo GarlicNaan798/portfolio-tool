@@ -12,3 +12,14 @@ dist/
 build/
 *.egg-info/
 state/
+
+# obsidian vault
+memory/
+.obsidian/workspace.json
+data/cache/
+
+# re-derivable by mt5/export_voo.py
+mt5/*.csv
+# installer + source papers, not source code
+mt5setup.exe
+*.pdf
