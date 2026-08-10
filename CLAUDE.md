@@ -55,30 +55,51 @@ These are decisions, not defaults. Do not quietly revise them.
 - **No lookahead.** Signals read bar t, fills happen at bar t+1 open. Any new
   rule preserves this.
 
-## Persisting what runs produce
+## The knowledge base
 
-Sweeps are slow and their output is not re-derivable without re-running.
+Everything that is not code lives in two folders, both committed, both plain
+markdown. They travel with `git clone` — nothing important lives in a tool's
+private directory. `memory/` is the real folder; `.claude/.../memory` is a
+junction pointing *into* it, so writing a memory writes into the repo.
 
-- `notes/` — one markdown note per meaningful run, written by
-  `swing_lab.py --md`. Results, dated. Never edited after the fact.
-- `memory/` — junction to my memory dir. Decisions, constraints, and user
-  preferences; one fact per file, `[[wikilinks]]` between them. Not run
-  output. Gitignored (the files live outside the repo).
+| folder | holds | lifecycle |
+|---|---|---|
+| `notes/` | what a run **did** — results, dated, machine-written by `--md` | append-only, never edited after the fact |
+| `memory/` | what it **meant** — decisions, findings, constraints, preferences | living; corrected or deleted when wrong |
 
-`notes/` is committed — it is the durable record and the only thing that
-survives a new machine.
+`MEMORY.md` is the index and the entry point. Every memory gets one line
+there. It is the first thing read in a new session, so it is the hinge the
+whole base turns on — if a fact is not reachable from it, it is lost.
 
-Before starting research that resembles earlier work, read `notes/` — the
-answer may already be there.
+### Filing rules
 
-## After a sweep, write the conclusion down
+Applied without being asked. This is a filing system, not a judgment call
+each time.
 
-Do this without being asked. A note in `notes/` records *what happened*; it
-does not record *what it meant*, and the judgment is the part that is
-expensive to reconstruct. When a run settles a question — a variant is dead,
-an instrument class behaves differently, a rule turned out to be doing
-nothing — add one file to `memory/` saying so, and link it to the note that
-produced it. One fact per file.
+1. **One fact per file.** A note that needs "and" in its summary is two notes.
+2. **Frontmatter is mandatory**, and `type` is what makes the base queryable:
+   `run` (in `notes/`), `finding`, `project`, `feedback`, `user`, `reference`.
+3. **Every note links.** A finding links to the `notes/` run that produced it;
+   a run links to the findings drawn from it. Use `[[wikilinks]]` — an
+   orphan note is a note that will never be found again.
+4. **A `[[link]]` to a note that does not exist yet is correct**, not an
+   error. It marks the gap.
+5. **Name files as the claim**, not the topic: `tsmom-fails-on-equity-etfs`,
+   not `tsmom-results`. The filename should survive being read alone.
+6. **Kill results are filed like any other finding.** "X does not beat B&H
+   out-of-sample" is worth more than a sweep that re-discovers it in six
+   weeks.
+7. **Parameters are never copied here.** They live in the code; the base
+   points at them. A copy is a second source of truth that goes stale.
 
-Kill results count. "TSMOM on equity ETFs does not beat B&H out-of-sample"
-is worth more than another sweep that re-discovers it in six weeks.
+### Before starting work
+
+Read `MEMORY.md`, then `notes/` if the task resembles earlier research. The
+answer may already be there, and re-running a sweep to re-learn something
+already filed is the specific failure this base exists to prevent.
+
+### After finishing work
+
+Write the conclusion down before reporting it. A run in `notes/` records what
+happened; the judgment is the expensive part to reconstruct and the part that
+vanishes when context does.

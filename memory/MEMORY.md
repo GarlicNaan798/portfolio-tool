@@ -1,0 +1,2 @@
+- [MT5 abandoned for Python backtests](mt5-abandoned-for-python-backtests.md) — the MQL5 EA is history; research runs in Python now.
+- [Autonomous strategy sweeps](autonomous-strategy-sweeps.md) — sweep the grid and report, don't ask which config to try first.

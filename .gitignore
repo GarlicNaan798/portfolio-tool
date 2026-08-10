@@ -14,7 +14,7 @@ build/
 state/
 
 # obsidian vault
-memory/
+# memory/ is committed - it is the knowledge base, not tool state
 .obsidian/workspace.json
 data/cache/
 
