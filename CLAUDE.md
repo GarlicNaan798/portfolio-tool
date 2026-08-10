@@ -70,3 +70,15 @@ survives a new machine.
 
 Before starting research that resembles earlier work, read `notes/` — the
 answer may already be there.
+
+## After a sweep, write the conclusion down
+
+Do this without being asked. A note in `notes/` records *what happened*; it
+does not record *what it meant*, and the judgment is the part that is
+expensive to reconstruct. When a run settles a question — a variant is dead,
+an instrument class behaves differently, a rule turned out to be doing
+nothing — add one file to `memory/` saying so, and link it to the note that
+produced it. One fact per file.
+
+Kill results count. "TSMOM on equity ETFs does not beat B&H out-of-sample"
+is worth more than another sweep that re-discovers it in six weeks.
