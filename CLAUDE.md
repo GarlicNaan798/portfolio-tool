@@ -79,9 +79,10 @@ each time.
 1. **One fact per file.** A note that needs "and" in its summary is two notes.
 2. **Frontmatter is mandatory**, and `type` is what makes the base queryable:
    `run` (in `notes/`), `finding`, `project`, `feedback`, `user`, `reference`.
-3. **Every note links.** A finding links to the `notes/` run that produced it;
-   a run links to the findings drawn from it. Use `[[wikilinks]]` — an
-   orphan note is a note that will never be found again.
+3. **Every note links, and findings link to their evidence.** A finding cites
+   the `notes/` run that produced it with `[[2026-08-10-2013-1d]]`. Links go
+   one way — findings point at runs, never the reverse, because runs are
+   immutable. An orphan note will never be found again.
 4. **A `[[link]]` to a note that does not exist yet is correct**, not an
    error. It marks the gap.
 5. **Name files as the claim**, not the topic: `tsmom-fails-on-equity-etfs`,
