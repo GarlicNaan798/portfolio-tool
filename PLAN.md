@@ -112,6 +112,34 @@ absolute returns are inflated. This is stated rather than corrected: free
 point-in-time membership data does not exist. The scaling test is the claim;
 the return levels are not.
 
+## Phase D - trend following as the paper actually implements it
+
+Not a re-run of `tsmom`. Four implementation gaps separate what was tested
+from what Moskowitz et al. describe, and all four push the same direction:
+
+| gap | tested so far | this phase |
+|---|---|---|
+| direction | long only - downtrend means cash | long AND short |
+| sizing | full allocation | inverse-volatility, constant risk |
+| stop | fixed at entry | trailing, ratchets up |
+| entry | "trend is up" state | breakout to a new N-day high |
+
+Judged as a diversified PORTFOLIO across the universe, which is how trend
+following is actually run and sold - not instrument by instrument. A single
+trend follower is expected to lose most of the time; the claim is that a
+basket of them is positive.
+
+### Pre-registered gates - both must hold
+
+1. Portfolio OOS Sharpe > **0.83** (SPY)
+2. Portfolio OOS CAGR > **5%** net of 0.25%/side
+
+A long-only variant runs alongside as a control, to isolate how much of any
+result comes from the short side specifically.
+
+Fail -> the momentum family is exhausted in every form the papers describe,
+and the conclusion is that price-only signals do not work here.
+
 ## Standing rules
 
 - Buy & hold is the benchmark, always.
