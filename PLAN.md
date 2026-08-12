@@ -76,6 +76,42 @@ Fail -> stop. Report the negative result rather than continuing to search;
 at that point the material in the papers is exhausted and further sweeps
 would be manufacturing a number rather than finding one.
 
+## Phase C - is breadth the binding constraint?
+
+Phase B did have ranking skill (fold 3: IC +0.109, t=2.85, p=0.007,
+long-short Sharpe 1.03) but not enough of it to survive costs. The
+fundamental law of active management says IR ~ IC x sqrt(N). Our IC is
+roughly 3x a typical published one; our N is 45x smaller.
+
+Design: measure IC and long-short IR at several universe sizes drawn from
+ONE larger universe, same model, same periods. Subsampling isolates the
+effect of N - any survivorship bias in the parent universe inflates all
+subset sizes equally, so the *scaling relationship* stays valid even though
+the levels do not.
+
+### Pre-registered prediction
+
+IR should scale with sqrt(N). Relative to N=25:
+
+| N | predicted IR multiple |
+|---|---|
+| 50 | 1.41x |
+| 100 | 2.00x |
+| 200 | 2.83x |
+
+Confirmed if measured IR rises monotonically with N and the N=200 multiple
+lands within +/-40% of 2.83x (i.e. 1.7x - 4.0x).
+
+Refuted if IR is flat or non-monotonic in N. That would mean breadth is not
+the constraint and the signal itself is too weak, which ends the programme.
+
+### Survivorship
+
+The parent universe is today's large caps, so it is survivorship-biased and
+absolute returns are inflated. This is stated rather than corrected: free
+point-in-time membership data does not exist. The scaling test is the claim;
+the return levels are not.
+
 ## Standing rules
 
 - Buy & hold is the benchmark, always.
