@@ -172,6 +172,40 @@ with a known expected difference.
 Outcome 2 is the one worth running this for. It is the only test in the
 programme that can invalidate the programme.
 
+## Phase F - add the negatively-correlated factor
+
+Phase A failed for a diagnosed reason, not a mysterious one: its three
+components were 0.67-0.69 correlated to SPY. Asness, Moskowitz & Pedersen
+(2013) name the fix - value and momentum are *negatively* correlated with
+each other, within and across asset classes, which is why the combination
+beats either sleeve.
+
+For non-equity assets they define value as long-horizon reversal, computable
+from price alone: roughly the negated 5-year return. No fundamentals needed,
+so it works on the 31-market futures book from Phase E.
+
+**Carry is deliberately not included.** It needs the futures curve - front
+against deferred contracts - and Yahoo serves only continuous front-month.
+Faking it from a single series would be inventing data. Filed as a gap.
+
+### Pre-registered gates
+
+Measured on era B (2010-2026), the live regime, since era A is a control
+rather than a target. Trend alone scored Sharpe 0.35 there.
+
+1. Trend/value correlation must be **below +0.3**. If the two sleeves are
+   correlated there is nothing to diversify and the rest is moot - this is
+   the check Phase A should have run first.
+2. Combined Sharpe must beat **0.35**, the long-only trend sleeve, by at
+   least 20% -> **> 0.42**.
+
+Blend weights are fixed rules only, equal-weight and inverse-vol. No
+optimisation, so there is nothing to overfit.
+
+Gate 1 failing is the informative outcome: it would mean price-derived value
+is not distinct from price-derived momentum on futures, and the whole
+combination idea is closed rather than merely untuned.
+
 ## Standing rules
 
 - Buy & hold is the benchmark, always.
