@@ -77,17 +77,30 @@ def signals(df, entry_n, exit_n, atr_mult, allow_short):
     return pd.Series(pos, index=df.index).shift(1).fillna(0.0)
 
 
-def sleeve(df, p):
-    """One instrument's return stream, scaled to a constant risk budget."""
+def sleeve(df, p, fee=None):
+    """One instrument's return stream, scaled to a constant risk budget.
+
+    `fee` is per side and MUST match the asset class. Charging an ETF's 25bps
+    to a futures contract (~1-2bps) is a 25x overcharge that turns a working
+    strategy into a losing one - see the Phase E correction.
+    """
+    fee = FEE if fee is None else fee
     pos = signals(df, p["entry_n"], p["exit_n"], p["atr_mult"], p["short"])
     ret = df["close"].pct_change().fillna(0.0)
+
+    # ponytail: winsorise instead of back-adjusting. Yahoo's continuous
+    # futures are unadjusted front-month, so rolls appear as fake returns and
+    # CL=F even crosses zero in April 2020 (pct_change -> -306%). Proper
+    # back-adjusted series are not freely available; clip at +/-25% to stop
+    # single artifacts dominating. Upgrade path: paid roll-adjusted data.
+    ret = ret.replace([np.inf, -np.inf], 0.0).clip(-0.25, 0.25)
 
     realised = ret.rolling(63).std() * np.sqrt(BPY)
     scale = (VOL_TARGET / realised).clip(upper=3.0).shift(1).fillna(0.0)
 
     gross = pos * scale * ret
     turn = (pos * scale).diff().abs().fillna(0.0)
-    return gross - turn * FEE
+    return gross - turn * fee
 
 
 def metrics(r):

@@ -140,6 +140,38 @@ result comes from the short side specifically.
 Fail -> the momentum family is exhausted in every form the papers describe,
 and the conclusion is that price-only signals do not work here.
 
+## Phase E - the paper's universe, and a positive control
+
+31 futures across rates, FX, energy, metals, ags and equity indexes, 26
+years each from 2000. This is the universe Moskowitz et al. actually trade,
+rather than the 22 equity ETFs everything so far was tested on. Crypto is
+excluded at the user's direction.
+
+The point is not only "does trend following work here". It is that no phase
+so far had a POSITIVE CONTROL - we never checked that the engine can detect
+a real effect when one is known to exist. The literature says trend
+following worked before 2009 and decayed sharply after. That gives two eras
+with a known expected difference.
+
+| era | dates | literature expectation |
+|---|---|---|
+| A | 2001-2008 | works - strong trend decade |
+| B | 2010-2026 | decayed - roughly half, fast signals flat |
+
+### Pre-registered outcomes
+
+1. **Era A Sharpe > 0.5 and Era A > Era B** - engine validated, decay is
+   real, and every prior negative result stands as a finding about the
+   market rather than about the code.
+2. **Era A Sharpe <= 0.2** - the engine cannot find an effect that is known
+   to be there. The implementation is suspect and all previous phases must
+   be re-examined before anything else is believed.
+3. **Era A works and Era B also works** - the instrument universe was the
+   problem all along, and the ETF results simply do not generalise.
+
+Outcome 2 is the one worth running this for. It is the only test in the
+programme that can invalidate the programme.
+
 ## Standing rules
 
 - Buy & hold is the benchmark, always.
