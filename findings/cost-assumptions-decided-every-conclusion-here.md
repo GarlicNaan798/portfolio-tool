@@ -32,11 +32,20 @@ sample:
     5bps    Sharpe  0.86
     25bps   Sharpe -0.07
 
-**Consequence:** [[paper-strategies-do-not-beat-buy-and-hold]] was
-established at 25bps and needs re-running at realistic ETF costs before it
-can be trusted as a statement about strategies rather than about a fee
-assumption. The trend-on-equities conclusion may survive - trend was losing
-on gross terms too - but that has not been checked.
+**RESOLVED - and the worry was wrong.** `recheck_costs.py` re-ran the ETF
+sweep at 0, 2, 5 and 25bps. `tsmom`, `cross` and `dip` beat buy & hold on
+5-6 of 22 instruments **at every cost level**, and 25bps reproduces the
+original 6/22 exactly. Dropping the fee to zero does not rescue them, so
+[[paper-strategies-do-not-beat-buy-and-hold]] stands as written for the
+strategies it tested. Cost was not the deciding factor there.
+
+The genuine gap was coverage, not cost: that sweep never included
+short-horizon mean reversion. See
+[[mean-reversion-survives-out-of-sample-if-costs-are-low]].
+
+The lesson survives even though this instance did not: state the cost
+assumption before the result, and check it against the actual instrument.
+Two of three instances did move a conclusion.
 
 The pattern to internalise: **state the cost assumption before the result,
 and check it against the actual instrument.** Every time that step was
