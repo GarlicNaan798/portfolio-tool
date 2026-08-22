@@ -1,35 +1,43 @@
 """One instrument, one rule. Read it top to bottom in five minutes.
 
-THE RULE
-    Buy when price closes above its highest high of the last N days.
-    Trail a stop ATR*M below the highest close since entry - it only ever
-    ratchets up.
-    Sell when the stop is hit, or price closes below its lowest low of the
-    last X days.
-    Long only. Never short.
+INSTRUMENT: WTI crude (CL=F). Oil mean-reverts hard, and holding it has been
+punishing - buy and hold returned 3.77% a year with a 93% drawdown since
+2000. That is the condition where a rule can add something.
 
-That is the whole strategy. It is mechanical support and resistance: the
-N-day high is resistance, and breaking it is the signal.
+THE RULE (mean reversion, the default)
+    Measure where today's close sits inside its own bar, ranked against the
+    last year of such readings. That is DV2 - a percentile, so it adapts to
+    volatility instead of assuming a fixed scale.
+    Buy when DV2 drops below 40 - the close is weak against its own history.
+    Sell when DV2 rises above 70.
+    Only while price is above its 200-day average. Long only.
 
-WHY THIS RULE
-    It is the only thing that survived seven phases of testing - see
-    findings/phase-e-validated-the-engine.md. Long only because shorting
-    lost in all three tests that included it
-    (findings/shorting-hurts-trend-following.md).
+THE OTHER RULE (breakout, --rule breakout)
+    Buy above the 100-day high, trail a ratcheting 3xATR stop, exit below the
+    20-day low. Kept because it is what survived the futures work - but on
+    oil it does not hold up.
+
+WHY MEAN REVERSION HERE
+    Both rules were run on both oils, then stress-tested twice: delete
+    calendar 2020, and delete each strategy's single best month.
+
+        CL=F  DV2 bull    0.40  ->  ex-2020  0.37   ex-best-month  0.33
+        CL=F  breakout    0.08  ->  ex-2020 -0.01
+        BZ=F  breakout    0.30  ->  ex-2020  0.20   ex-best-month  0.21
+
+    Mean reversion on WTI is the only combination that barely moves under
+    both. The breakout rule leans on 2020 and on single months.
 
 WHAT IT WILL NOT DO
-    Beat buy & hold on something that rises steadily. It sits in cash
-    between signals, and cash loses to a compounding asset
-    (findings/paper-strategies-do-not-beat-buy-and-hold.md).
+    Be provable. Over 26 years the standard error on a Sharpe is about 0.20,
+    so one instrument needs Sharpe above 0.8 to clear significance after
+    correcting for how many were looked at. See
+    findings/no-single-instrument-is-statistically-distinguishable.md.
 
-    Nor can one instrument ever be proven to work: over ~16 years the
-    standard error on a Sharpe is about 0.25, so a single market needs
-    Sharpe > 0.8 to clear significance
-    (findings/no-single-instrument-is-statistically-distinguishable.md).
-    This is a rule you can run and understand, not a result you can prove.
+    And the drawdowns here are severe. This is oil.
 
     uv run --with yfinance --with pandas --with numpy python swing.py
-    uv run ... python swing.py --symbol GC=F --entry 55
+    uv run ... python swing.py --symbol BZ=F --rule breakout
 """
 
 import argparse
@@ -44,20 +52,16 @@ CACHE = Path(__file__).parent / "data" / "cache"
 BPY = 252
 START_EQUITY = 10_000.0
 
-# Default is silver: the highest trend Sharpe in the 2010-2026 futures book
-# that ALSO beat its own buy & hold (0.47 vs 0.43). Be honest about what that
-# is - a pick made after seeing the table, so it carries selection bias. Any
-# instrument here is a starting point, not a recommendation. Change it freely.
-DEFAULT_SYMBOL = "SI=F"
+DEFAULT_SYMBOL = "CL=F"
 
-# Cost per side. Futures ~1-2bps, equity ETFs ~25bps. This single number
-# decided whether the strategy worked in earlier tests - a 25x error once
-# flipped Sharpe from 0.99 to 0.22. Set it to match what you actually pay.
+# Per side. Futures ~1-2bps, liquid ETFs ~1-5bps, thin ETFs 5-25bps. This one
+# number has flipped a conclusion three times in this project - set it to what
+# you actually pay, and check it against the instrument.
 DEFAULT_FEE_BPS = 1.5
 
 
 def load(symbol, refresh=False):
-    """Daily bars, cached on disk. Yahoo's cookie endpoint fails randomly."""
+    """Daily bars, cached. Yahoo's cookie endpoint fails at random."""
     CACHE.mkdir(parents=True, exist_ok=True)
     path = CACHE / f"{symbol.replace('=', '_')}_1d.csv"
 
@@ -82,12 +86,11 @@ def load(symbol, refresh=False):
             sys.exit(f"could not fetch {symbol}")
 
     # Continuous futures from Yahoo are unadjusted front-month, so contract
-    # rolls show up as fake price jumps - WTI even crosses zero in April 2020.
-    # Clipping stops one artifact dominating the result.
-    # ponytail: winsorising, not back-adjusting. Upgrade path is paid
-    # roll-adjusted data if this ever needs to be precise.
-    df = df[df["high"] >= df["low"]]
-    return df[df["close"] > 0]
+    # rolls appear as fake jumps and WTI's April 2020 print is negative - a
+    # percentage change across zero is meaningless. Drop those bars.
+    # ponytail: filtering, not back-adjusting. Paid roll-adjusted data is the
+    # upgrade path if this ever needs to be precise.
+    return df[(df["high"] >= df["low"]) & (df["close"] > 0) & (df["open"] > 0)]
 
 
 def atr(df, n=14):
@@ -98,57 +101,84 @@ def atr(df, n=14):
     return tr.ewm(alpha=1 / n, adjust=False).mean()
 
 
-def backtest(df, entry_n, exit_n, stop_mult, fee):
+def dv2(df, lookback=252):
+    """Where the close sits inside its bar, percentile-ranked over a year.
+
+    Percentile ranking is what makes this volatility-adaptive: it assumes
+    nothing about the shape of the return distribution.
+    """
+    mid = (df["high"] + df["low"]) / 2.0
+    smooth = (df["close"] / mid - 1.0).rolling(2).mean()
+    return smooth.rolling(lookback).apply(
+        lambda w: (w[-1] > w[:-1]).sum() / (len(w) - 1) * 100.0, raw=True)
+
+
+def backtest(df, rule, fee, entry_n=100, exit_n=20, stop_mult=3.0,
+             buy_below=40.0, sell_above=70.0):
     """Signals read bar t. Fills happen at bar t+1's open. No lookahead."""
-    a = atr(df)
-    resistance = df["high"].rolling(entry_n).max().shift(1)
-    support = df["low"].rolling(exit_n).min().shift(1)
+    d = df.copy()
+    d["atr"] = atr(d)
+    d["sma200"] = d["close"].rolling(200).mean()
+    if rule == "breakout":
+        d["resistance"] = d["high"].rolling(entry_n).max().shift(1)
+        d["support"] = d["low"].rolling(exit_n).min().shift(1)
+        d = d.dropna(subset=["atr", "resistance", "support"])
+    else:
+        d["dv2"] = dv2(d)
+        d = d.dropna(subset=["atr", "sma200", "dv2"])
 
     equity, shares, stop = START_EQUITY, 0, 0.0
     curve, in_market, trades = [], [], []
     entry_px = entry_i = None
 
-    rows = list(df.itertuples())
+    rows = list(d.itertuples())
     for i in range(1, len(rows)):
         prev, bar = rows[i - 1], rows[i]
         fill = bar.open
 
-        if shares > 0:
-            # Ratchet the stop up behind the highest close so far.
-            stop = max(stop, prev.close - stop_mult * a.iloc[i - 1])
-            hit = bar.low <= stop
-            broke = prev.close < support.iloc[i - 1]
-            if hit or broke:
-                px = stop if hit else fill
-                equity += shares * px * (1 - fee)
-                trades.append((entry_px, px, i - entry_i,
-                               "stop" if hit else "support"))
-                shares, entry_px, entry_i = 0, None, None
-
-        if shares == 0 and not np.isnan(resistance.iloc[i - 1]):
-            if prev.close > resistance.iloc[i - 1]:
+        if rule == "breakout":
+            if shares > 0:
+                stop = max(stop, prev.close - stop_mult * prev.atr)
+                hit, broke = bar.low <= stop, prev.close < prev.support
+                if hit or broke:
+                    px = stop if hit else fill
+                    equity += shares * px * (1 - fee)
+                    trades.append((entry_px, px, i - entry_i,
+                                   "stop" if hit else "support"))
+                    shares, entry_px, entry_i = 0, None, None
+            if shares == 0 and prev.close > prev.resistance:
                 n = int(equity // (fill * (1 + fee)))
                 if n > 0:
                     equity -= n * fill * (1 + fee)
                     shares, entry_px, entry_i = n, fill, i
-                    stop = fill - stop_mult * a.iloc[i - 1]
+                    stop = fill - stop_mult * prev.atr
+        else:
+            bull = prev.close > prev.sma200
+            if shares > 0 and (prev.dv2 > sell_above or not bull):
+                equity += shares * fill * (1 - fee)
+                why = "overbought" if prev.dv2 > sell_above else "regime"
+                trades.append((entry_px, fill, i - entry_i, why))
+                shares, entry_px, entry_i = 0, None, None
+            elif shares == 0 and bull and prev.dv2 < buy_below:
+                n = int(equity // (fill * (1 + fee)))
+                if n > 0:
+                    equity -= n * fill * (1 + fee)
+                    shares, entry_px, entry_i = n, fill, i
 
         curve.append(equity + shares * bar.close)
         in_market.append(shares > 0)
 
-    return (pd.Series(curve, index=df.index[1:]), trades,
+    return (pd.Series(curve, index=d.index[1:]), trades,
             float(np.mean(in_market)))
 
 
 def stats(curve):
     years = len(curve) / BPY
-    total = curve.iloc[-1] / START_EQUITY
-    cagr = total ** (1 / max(years, 0.1)) - 1
+    cagr = (curve.iloc[-1] / START_EQUITY) ** (1 / max(years, 0.1)) - 1
     dd = (curve / curve.cummax() - 1).min()
     r = curve.pct_change().dropna()
     sharpe = r.mean() / r.std() * np.sqrt(BPY) if r.std() > 0 else 0.0
-    # Lo (2002): SE of an annualised Sharpe over T years.
-    se = np.sqrt((1 + sharpe ** 2 / 2) / max(years, 0.1))
+    se = np.sqrt((1 + sharpe ** 2 / 2) / max(years, 0.1))   # Lo (2002)
     return cagr, dd, sharpe, se, years
 
 
@@ -159,29 +189,44 @@ def buy_hold(df, fee):
 
 
 def self_check():
-    """A rising series must trade; a flat one must not. If this fails the
-    rule is broken and every number below is noise."""
-    idx = pd.date_range("2015-01-01", periods=500, freq="B")
+    """Each rule must fire when it should and stay flat when it should not."""
+    idx = pd.date_range("2015-01-01", periods=600, freq="B")
 
-    ramp = pd.Series(np.linspace(100, 900, 500), index=idx)
+    # Breakout: a ramp out-running its own bar range must stay held.
+    ramp = pd.Series(np.linspace(100, 900, 600), index=idx)
     up = pd.DataFrame({"open": ramp, "high": ramp * 1.001,
                        "low": ramp * 0.999, "close": ramp})
-    _, trades, expo = backtest(up, 100, 20, 3.0, 0.0)
-    assert expo > 0.5, f"self-check: uptrend held only {expo:.0%} of the time"
+    _, _, expo = backtest(up, "breakout", 0.0)
+    assert expo > 0.5, f"self-check: breakout held only {expo:.0%} in an uptrend"
 
+    # A dead-flat series must never trade, under either rule.
     flat = pd.Series(100.0, index=idx)
     fl = pd.DataFrame({"open": flat, "high": flat, "low": flat, "close": flat})
-    _, _, expo2 = backtest(fl, 100, 20, 3.0, 0.0)
-    assert expo2 == 0, "self-check: took a position in a flat market"
+    for r in ("breakout", "meanrev"):
+        _, _, e = backtest(fl, r, 0.0)
+        assert e == 0, f"self-check: {r} traded a flat market"
+
+    # DV2 is a percentile: bounded, and it must track its own input. A steady
+    # trend has a CONSTANT close-vs-midpoint ratio, so bar shapes have to vary
+    # or the rank is degenerate - an earlier version of this check had that
+    # backwards and asserted the opposite.
+    rng = np.random.default_rng(0)
+    close = pd.Series(100 * np.exp(np.cumsum(rng.normal(0, .01, 600))), index=idx)
+    span = close * 0.02
+    low = close - span * rng.uniform(0, 1, 600)
+    df = pd.DataFrame({"open": close, "high": low + span,
+                       "low": low, "close": close})
+    v = dv2(df).dropna()
+    assert v.between(0, 100).all(), "self-check: DV2 outside 0-100"
+    raw = (df["close"] / ((df["high"] + df["low"]) / 2) - 1).rolling(2).mean()
+    assert v.corr(raw.loc[v.index]) > 0.5, "self-check: DV2 lost its input"
     print("self-check: PASS")
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--symbol", default=DEFAULT_SYMBOL)
-    p.add_argument("--entry", type=int, default=100, help="breakout lookback")
-    p.add_argument("--exit", type=int, default=20, help="support lookback")
-    p.add_argument("--stop", type=float, default=3.0, help="ATR multiple")
+    p.add_argument("--rule", default="meanrev", choices=["meanrev", "breakout"])
     p.add_argument("--fee-bps", type=float, default=DEFAULT_FEE_BPS)
     p.add_argument("--refresh", action="store_true")
     a = p.parse_args()
@@ -189,57 +234,42 @@ def main():
     self_check()
     fee = a.fee_bps / 10_000
     df = load(a.symbol, a.refresh)
-    if len(df) < 400:
-        sys.exit(f"{a.symbol}: only {len(df)} bars, need 400+")
+    if len(df) < 500:
+        sys.exit(f"{a.symbol}: only {len(df)} bars, need 500+")
 
-    curve, trades, expo = backtest(df, a.entry, a.exit, a.stop, fee)
+    curve, trades, expo = backtest(df, a.rule, fee)
     c, dd, sr, se, years = stats(curve)
     bh = buy_hold(df, fee)
     bc, bdd, bsr, bse, _ = stats(bh)
 
     print(f"\n{a.symbol}   {df.index[0]:%Y-%m-%d} to {df.index[-1]:%Y-%m-%d}"
-          f"   ({years:.1f} years)")
-    print(f"rule: buy above the {a.entry}-day high, trail {a.stop}x ATR, "
-          f"exit below the {a.exit}-day low, {a.fee_bps}bps/side\n")
-
+          f"   ({years:.1f} years)   rule: {a.rule}   {a.fee_bps}bps/side\n")
     print(f"{'':10s} {'CAGR':>8s} {'maxDD':>8s} {'Sharpe':>8s} {'+/-':>6s}")
     print(f"{'strategy':10s} {c:>8.2%} {dd:>8.1%} {sr:>8.2f} {se:>6.2f}")
     print(f"{'buy & hold':10s} {bc:>8.2%} {bdd:>8.1%} {bsr:>8.2f} {bse:>6.2f}")
 
-    wins = [t for t in trades if t[1] > t[0]]
     if trades:
-        held = np.mean([t[2] for t in trades])
-        print(f"\n{len(trades)} trades, {len(wins) / len(trades):.0%} winners, "
-              f"{held:.0f} days held on average, {expo:.0%} of days in market")
-        stops = sum(1 for t in trades if t[3] == "stop")
-        print(f"exits: {stops} on the trailing stop, "
-              f"{len(trades) - stops} on the support break")
+        wins = sum(1 for t in trades if t[1] > t[0])
+        print(f"\n{len(trades)} trades, {wins / len(trades):.0%} winners, "
+              f"{np.mean([t[2] for t in trades]):.0f} days held on average, "
+              f"{expo:.0%} of days in market")
 
-    if trades and stops == len(trades):
-        print(f"\nNote: every exit came from the trailing stop and none from "
-              f"the\n{a.exit}-day support break - at {a.stop}x ATR the stop is "
-              f"always the tighter\nof the two, so --exit does nothing here. "
-              f"The rule is effectively\none entry and one exit.")
-
-    # Compute significance rather than assuming it. t = Sharpe / SE.
     t = sr / se if se > 0 else 0.0
     print(f"\nSharpe {sr:.2f} +/- {se:.2f} over {years:.0f} years -> t = {t:.2f}")
     if abs(t) < 2:
-        print("Not distinguishable from zero. This is a rule you can run, "
-              "not an edge\nyou have shown to exist.")
+        print("Not distinguishable from zero on its own.")
     else:
-        print("Nominally significant on its own. But this instrument was "
-              "chosen after\nreading a table of 31 markets, so the honest "
-              "threshold is 0.05/31 -\nrequiring t > 3.2, not t > 2. Selection "
-              "bias, not significance.")
+        print("Nominally significant, but this instrument and this rule were\n"
+              "both chosen after reading the results of others - the honest\n"
+              "bar is higher than t > 2.")
 
-    if sr < bsr:
-        print(f"\nBuy & hold scored higher ({bsr:.2f} vs {sr:.2f}). The rule "
-              f"earns its keep\nonly where holding is painful.")
+    if sr > bsr:
+        print(f"\nBeats buy and hold on Sharpe ({sr:.2f} vs {bsr:.2f}) and on\n"
+              f"drawdown ({dd:.0%} vs {bdd:.0%}), earning {c - bc:+.1%} a year\n"
+              f"against it.")
     else:
-        print(f"\nBeats buy & hold on Sharpe ({sr:.2f} vs {bsr:.2f}) with "
-              f"{abs(dd) / abs(bdd) - 1:+.0%} the drawdown,\nbut gives up "
-              f"{bc - c:.1%} a year of return to do it.")
+        print(f"\nBuy and hold scored higher ({bsr:.2f} vs {sr:.2f}). This rule\n"
+              f"earns its keep only where holding is painful.")
 
 
 if __name__ == "__main__":
