@@ -148,3 +148,46 @@ def implied_ir(ic, n_names, rebals_per_year=12):
     findings/phase-c-breadth-was-not-the-constraint.md.
     """
     return ic * np.sqrt(n_names * rebals_per_year)
+
+
+def decile_report(px, horizon=21, buckets=5, min_names=25):
+    """Mean forward return by signal quintile.
+
+    IC answers "does the ranking correlate with returns" across the WHOLE
+    cross-section. A long-only top-N portfolio only ever holds the top
+    bucket, so a signal whose power sits in the bottom - the names you would
+    have to short - shows a fine IC and a useless portfolio.
+
+    This is the diagnostic that explains that gap. Read the top bucket, not
+    the spread, when deciding whether a long-only book can capture a signal.
+    """
+    fwd = forward_return(px, horizon)
+    rows = []
+
+    for name, s in build(px).items():
+        acc = {b: [] for b in range(buckets)}
+        for d in s.index[::horizon]:
+            if d not in fwd.index:
+                continue
+            a, b = s.loc[d], fwd.loc[d]
+            ok = a.notna() & b.notna()
+            if ok.sum() < min_names:
+                continue
+            q = pd.qcut(a[ok].rank(method="first"), buckets, labels=False)
+            for bucket in range(buckets):
+                sel = b[ok][q == bucket]
+                if len(sel):
+                    acc[bucket].append(sel.mean())
+
+        if not acc[0]:
+            continue
+        means = [float(np.mean(acc[b])) for b in range(buckets)]
+        top, bot = means[-1], means[0]
+        spread = pd.Series(acc[buckets - 1]) - pd.Series(acc[0])
+        t_spread = (spread.mean() / spread.std() * np.sqrt(len(spread))
+                    if spread.std() else 0.0)
+        rows.append(dict(signal=name, **{f"q{i+1}": means[i]
+                                         for i in range(buckets)},
+                         spread=top - bot, t_spread=t_spread))
+
+    return pd.DataFrame(rows).set_index("signal")

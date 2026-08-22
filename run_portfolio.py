@@ -43,6 +43,18 @@ def step1_ic(px, horizon):
               f"{alpha.implied_ir(r['ic'], px.shape[1], 252 / horizon):>11.2f}")
     print("\nImplied IR is Grinold's ceiling assuming independent bets. Real")
     print("names are correlated, so expect roughly 40% of it.")
+    dec = alpha.decile_report(px, horizon=horizon)
+    if not dec.empty:
+        print("")
+        print("  forward return by quintile (q5 = highest score) - the")
+        print(f"  long-only book only ever holds q5")
+        cols = [c for c in dec.columns if c.startswith("q")]
+        print(f"{'signal':>10s} " + " ".join(f"{c:>8s}" for c in cols)
+              + f" {'q5-q1':>8s} {'t':>6s}")
+        for name, r in dec.iterrows():
+            print(f"{name:>10s} " + " ".join(f"{r[c]:>8.2%}" for c in cols)
+                  + f" {r['spread']:>8.2%} {r['t_spread']:>6.2f}")
+
     best = ic["t"].abs().max()
     if best < 2:
         print(f"\nNo signal clears t=2 (best {best:.2f}). Construction cannot")
@@ -190,6 +202,9 @@ def main():
     p.add_argument("--embargo", type=int, default=30)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--refresh", action="store_true")
+    p.add_argument("--signal", default="combined",
+                   help="'combined', or a comma list from "
+                        + ",".join(alpha.SIGNALS))
     args = p.parse_args()
 
     px, dropped = data.panel(data.LARGE_CAP, refresh=args.refresh)
@@ -205,7 +220,21 @@ def main():
           "affected, but the bias is real.\n")
 
     step1_ic(px, args.horizon)
-    scores = alpha.combine(alpha.build(px))
+
+    sigs = alpha.build(px)
+    if args.signal == "combined":
+        scores = alpha.combine(sigs)
+    else:
+        picked = [s.strip() for s in args.signal.split(",")]
+        unknown = [s for s in picked if s not in sigs]
+        if unknown:
+            raise SystemExit(f"unknown signal(s): {unknown}")
+        scores = alpha.combine({k: sigs[k] for k in picked})
+        print(f"\nscoring on: {', '.join(picked)} (not the full blend)")
+        print("Note: this signal was chosen after reading the IC table above,")
+        print("so it carries selection bias. Short-term reversal is at least")
+        print("independently documented (Jegadeesh 1990, Lehmann 1990) rather")
+        print("than discovered here - but the choice is still post-hoc.")
     step2_construction(px, scores, bench, args)
     step3_walkforward(px, scores, bench, args)
 
