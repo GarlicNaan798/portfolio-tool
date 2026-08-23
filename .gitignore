@@ -29,3 +29,6 @@ d_us_txt/
 d_us_txt.zip
 data-main/
 data-main.zip
+
+# AQR factor cache (re-downloadable)
+data/factors/
