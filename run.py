@@ -144,8 +144,93 @@ def cmd_alpha(args):
           f"(t = {a_ew['t']:.2f})")
 
 
+
+def cmd_holding(args):
+    """Was the problem selection, selling early, or holding too long?
+
+    Each hypothesis predicts a different shape for the same curve - the
+    average return of our picks over increasing holding periods, measured
+    against the universe over the identical window:
+
+        sold too early   excess keeps growing past the 21-day hold
+        held too long    excess peaks early, then decays
+        cannot pick      excess is ~0 at every horizon
+
+    No opinion needed; the shape decides.
+    """
+    px, _, _ = load_universe(args.refresh)
+    scores = alpha_mod.combine(alpha_mod.build(px))
+    horizons = [5, 10, 21, 42, 63, 126, 252]
+    dates = list(px.index)[::args.horizon]
+
+    print(f"top-{args.top_n} picks vs universe, by holding period")
+    print(f"{len(dates)} selection dates")
+    print()
+    print(f"{'days held':>10s} {'picks':>9s} {'universe':>9s} "
+          f"{'excess':>9s} {'t':>6s} {'ann. excess':>12s}")
+
+    rows = []
+    for h in horizons:
+        fwd = px.shift(-h) / px - 1.0
+        diffs = []
+        for d in dates:
+            if d not in scores.index or d not in fwd.index:
+                continue
+            sc = scores.loc[d].dropna()
+            if len(sc) < args.top_n:
+                continue
+            f = fwd.loc[d]
+            picks = sc.nlargest(args.top_n).index
+            pr = f.reindex(picks).dropna()
+            ur = f.dropna()
+            if len(pr) < args.top_n // 2 or len(ur) < 20:
+                continue
+            diffs.append((pr.mean(), ur.mean()))
+        if len(diffs) < 12:
+            continue
+        pk = pd.Series([a for a, _ in diffs])
+        un = pd.Series([b for _, b in diffs])
+        ex = pk - un
+        t = ex.mean() / ex.std() * (len(ex) ** 0.5) if ex.std() else 0.0
+        ann = ex.mean() * (252 / h)
+        rows.append((h, ex.mean(), t, ann))
+        print(f"{h:>10d} {pk.mean():>9.2%} {un.mean():>9.2%} "
+              f"{ex.mean():>+9.2%} {t:>6.2f} {ann:>+12.2%}")
+
+    if not rows:
+        print("insufficient data")
+        return
+
+    print()
+    peak_h, peak_ann = max(rows, key=lambda r: r[3])[0], max(r[3] for r in rows)
+    held = args.horizon
+    at_hold = next((r[3] for r in rows if r[0] == held), None)
+    best_t = max(abs(r[2]) for r in rows)
+
+    print(f"annualised excess peaks at {peak_h} days ({peak_ann:+.2%})")
+    if at_hold is not None:
+        print(f"we actually hold {held} days ({at_hold:+.2%})")
+    print(f"best t across horizons: {best_t:.2f}")
+
+    print()
+    if best_t < 2.0:
+        print("VERDICT: selection. The picks are not reliably different from")
+        print("the universe at ANY horizon, so timing the exit is moot -")
+        print("there is nothing being held onto or sold away.")
+    elif peak_h > held * 1.5:
+        print("VERDICT: sold too early. Excess keeps accruing well past the")
+        print("holding period - a longer hold captures more of it.")
+    elif peak_h < held / 1.5:
+        print("VERDICT: held too long. Excess peaks early and decays, so the")
+        print("later part of each hold gives back what the start earned.")
+    else:
+        print("VERDICT: holding period is roughly right. The limit is the")
+        print("size of the edge, not when it is harvested.")
+
+
 COMMANDS = {"signals": cmd_signals, "portfolio": cmd_portfolio,
-            "levels": cmd_levels, "alpha": cmd_alpha}
+            "levels": cmd_levels, "alpha": cmd_alpha,
+            "holding": cmd_holding}
 
 
 def main():
