@@ -74,3 +74,38 @@ def block_bootstrap_sharpe(returns, n=2000, block=20, seed=0, bpy=BPY):
         out[i] = s.mean() / s.std() * np.sqrt(bpy) if s.std() else 0.0
     lo, hi = np.percentile(out, [2.5, 97.5])
     return float(actual), float(lo), float(hi), float((out <= 0).mean())
+
+
+def alpha_beta(returns, bench_returns, bpy=BPY):
+    """Regress the strategy on a benchmark: r = alpha + beta * r_bench.
+
+    Alpha is the intercept - the part of the return NOT explained by simply
+    carrying market exposure. Subtracting two CAGRs is not alpha: a portfolio
+    with beta 1.3 SHOULD out-return the market in a rising one, and that
+    excess is leverage, not skill.
+
+    Returns annualised alpha, its t-stat, beta, and R-squared. No statsmodels
+    dependency - it is a two-parameter OLS.
+    """
+    df = pd.concat([pd.Series(returns), pd.Series(bench_returns)],
+                   axis=1).dropna()
+    if len(df) < 30:
+        return dict(alpha=0.0, t=0.0, beta=0.0, r2=0.0, n=len(df))
+    y = df.iloc[:, 0].values
+    x = df.iloc[:, 1].values
+    n = len(y)
+
+    vx = x.var(ddof=1)
+    beta = float(np.cov(x, y, ddof=1)[0, 1] / vx) if vx > 0 else 0.0
+    a = float(y.mean() - beta * x.mean())
+
+    resid = y - (a + beta * x)
+    s = resid.std(ddof=2)
+    se_a = s * np.sqrt(1.0 / n + x.mean() ** 2 / ((n - 1) * vx)) if vx > 0 else 0.0
+    t = float(a / se_a) if se_a > 0 else 0.0
+
+    ss_res = float((resid ** 2).sum())
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else 0.0
+
+    return dict(alpha=a * bpy, t=t, beta=beta, r2=r2, n=n)

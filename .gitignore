@@ -23,3 +23,9 @@ mt5/*.csv
 # installer + source papers, not source code
 mt5setup.exe
 *.pdf
+
+# provided archives and their extracts
+d_us_txt/
+d_us_txt.zip
+data-main/
+data-main.zip
