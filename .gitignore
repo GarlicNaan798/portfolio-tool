@@ -1,18 +1,13 @@
 __pycache__/
 *.py[cod]
 .venv/
-.uv-cache/
 .env
 
-# large inputs and caches, all re-obtainable
-data/
-d_us_txt/
-d_us_txt.zip
-data-main/
-data-main.zip
+# research PDFs: kept on disk, not committed
+Research Papers/
 *.pdf
 *.docx
+
+# caches and downloads, all re-obtainable
+data/
 *.zip
-*.exe
-.obsidian/
-.memsearch/
