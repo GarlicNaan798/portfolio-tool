@@ -1,34 +1,18 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .venv/
-venv/
+.uv-cache/
 .env
-.env.*
-!.env.example
-dist/
-build/
-*.egg-info/
-state/
 
-# obsidian vault
-# memory/ is committed - it is the knowledge base, not tool state
-.obsidian/workspace.json
-data/cache/
-
-# re-derivable by mt5/export_voo.py
-mt5/*.csv
-# installer + source papers, not source code
-mt5setup.exe
-*.pdf
-
-# provided archives and their extracts
+# large inputs and caches, all re-obtainable
+data/
 d_us_txt/
 d_us_txt.zip
 data-main/
 data-main.zip
-
-# AQR factor cache (re-downloadable)
-data/factors/
+*.pdf
+*.docx
+*.zip
+*.exe
+.obsidian/
+.memsearch/
