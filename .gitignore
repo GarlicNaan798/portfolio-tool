@@ -1,14 +1,13 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 .venv/
-venv/
 .env
-.env.*
-!.env.example
-dist/
-build/
-*.egg-info/
-state/
+
+# research PDFs: kept on disk, not committed
+Research Papers/
+*.pdf
+*.docx
+
+# caches and downloads, all re-obtainable
+data/
+*.zip
