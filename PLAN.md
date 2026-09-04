@@ -1,87 +1,131 @@
-# Phase 1: does aggregate state predict when factors pay?
+# Plan: does any published anomaly survive contact with a retail account?
 
-Written **before any data is pulled**. The council's condition for this being
-worth building at all was that the sign, threshold, and the action taken
-under *every* outcome — including success — are fixed in advance.
+Steps 1 and 2 are done and their results are below. Steps 3-6 are
+pre-registered — criteria, thresholds and the action under every outcome are
+fixed here **before** the data is looked at, because the previous project's
+central failure was measuring after deciding what counted as success.
 
-## The question
+## Why this line of attack
 
-Five papers (see `Research Papers/`) argue the same thing from different
-angles: anomaly returns are **time-varying and conditional**, not constant.
-Papamichalis & Ryu (2025) predict returns fall on both the long and short
-side as sentiment rises. Chen (2015) finds flow-driven mispricing is
-strongest when funding costs are high. Hollstein et al. (2026) find most
-explanatory power lives in the **time-series** dimension, not the
-cross-section.
+Two replication studies reach opposite verdicts on the same literature:
 
-Every strategy in the previous project was unconditional. That is the gap.
+- **Chen & Zimmermann**: ~98% of published anomalies replicate, following
+  each original paper's own methodology.
+- **Hou, Xue & Zhang (2020)**: 82% of 452 anomalies **fail** at t > 2.78,
+  once microcaps are removed and returns are value-weighted.
 
-## Two changes the council forced, and why
+Both are right. The disagreement is entirely about *where* the anomaly lives.
+HXZ put it plainly: *"because of high costs in trading these stocks,
+anomalies in microcaps are more apparent than real."*
 
-**Real-time state variables, not Baker-Wurgler sentiment.**
-BW is built by PCA over the full sample, orthogonalised ex post, revised, and
-published with a lag. The look-ahead is in the *loadings*, not the dates, so
-a backtest using it will not look wrong. The previous project shipped two
-data bugs that were caught only because a number looked implausible; this one
-would not have been. Using VIX, the BAA–AAA credit spread and the term spread
-removes the objection entirely: each is published once, never revised, and
-was observable on the day.
+That is the question this project has actually been asking all along, without
+knowing it.
 
-**Tradeable factor ETFs, not AQR paper series.**
-AQR factor returns are gross of financing, borrow and rebalancing. Cost
-misspecification flipped three conclusions in the previous project, once
-producing a false negative. MTUM/VLUE/QUAL/USMV have real prices and real
-spreads. AQR series are a cross-check on sign, never the dependent variable.
+## DONE — Step 1: pull the data
 
-## Pre-registered hypothesis
+`openassetpricing` gives 212 anomalies with monthly long-short portfolio
+returns, 1926-2024, plus metadata for 331 signals (authors, year, data type,
+rebalance period, original sample window). Cached under `data/cz/`.
 
-**H:** factor excess returns over the next month are predictable from the
-level of aggregate stress observable today. Specifically, factor returns are
-**higher** following high-stress readings (high VIX, wide credit spreads) and
-**lower** following calm ones — the limits-to-arbitrage story, where mispricing
-is largest when arbitrage capital is most constrained.
+No reconstruction. The previous project rebuilt TSMOM and value by hand and
+got both partly wrong, catching the errors only by luck.
 
-## Pre-registered thresholds
+## DONE — Step 2: split by construction
 
-Judged on the **out-of-sample** half only, with the split fixed at 2015-01-01
-before looking at anything.
+    portfolio set                    t>1.96   t>2.78   median |t|   median ann
+    original (as published)            79%      67%       3.44        +5.2%
+    value-weighted                     48%      31%       1.81        +3.4%
+    microcaps excluded (NYSE p20)      67%      50%       2.74        +3.6%
+    price > $5                         75%      59%       3.16        +4.0%
 
-**CONFIRMED** requires all three:
-1. Coefficient sign matches H for at least 3 of the 4 factor ETFs
-2. Pooled t-statistic > 2.5 on Newey-West standard errors with 12 lags
-   (the higher bar is deliberate: the regressor is persistent, and Stambaugh
-   bias pushes t toward the hypothesis)
-3. A conditional strategy — size up in high stress, down in low — beats
-   the same factor held constantly, **after 5bps/side**, on the OOS half
+**Value-weighting alone halves survival** (67% -> 31%) and pushes the median
+anomaly to |t| = 1.81, below significance. Microcap exclusion costs a further
+chunk. Combining both, as HXZ do, lands near their reported 18% survival.
 
-**REJECTED** if any of the three fails.
+**This independently validates the previous project's negative results.** It
+tested large caps; that is where the literature says anomalies die. A measured
+edge of 0.28% at t = 1.53 is what a large-cap anomaly is *supposed* to look
+like.
 
-## Pre-registered actions
+Note also: the median annual return is +3.4% value-weighted, and that is
+**gross**.
 
-- **If REJECTED:** the conditioning thesis is dead for retail-accessible
-  data. Record it and stop. Do not substitute a different state variable and
-  re-run; that is "change the input, keep the premise", which the previous
-  council flagged and which produced ten phases of nothing.
-- **If CONFIRMED:** do NOT trade it. Next step is a third holdout on
-  non-US factor ETFs (IMTM, IVLU) and a cost-sensitivity sweep to 25bps.
-  Confirmation here buys one more test, not a position.
-- **If MIXED** (sign holds, t fails): treat as rejected. Report the sign as
-  an observation, not a finding.
+---
 
-## Known limitations, stated now rather than discovered later
+## Step 3 — which anomalies can we even compute?
 
-- Factor ETFs start ~2013 (MTUM April 2013), so the sample is ~13 years.
-  SE(Sharpe) over 13 years is roughly 0.28 — this cannot establish a small
-  effect, and is not expected to.
-- The OOS half is ~11 years of monthly data: about 130 observations, and
-  fewer effective ones because VIX is persistent.
-- **A confirmed result at this sample size is weak evidence, not a strategy.**
-  That is why the action under confirmation is another test.
+`Cat.Data` in the metadata separates signals needing accounting data,
+13F filings, or analyst forecasts from those computable from **price and
+volume alone**. Only the last group is reachable with Alpaca.
+
+**Pre-registered question:** do price-only anomalies survive value-weighting
+at a materially different rate than accounting-based ones?
+
+**Thresholds, fixed now:**
+- If price-only survival at t > 2.78 under value-weighting is **below 20%**,
+  the price-only avenue is closed. Record it and stop pursuing price signals.
+- If **above 40%**, price-only anomalies are the live subset and step 4
+  proceeds on them alone.
+- Between 20-40%: proceed, but treat every subsequent result as provisional.
+
+## Step 4 — post-publication decay
+
+McLean & Pontiff found anomaly returns fall ~26% out-of-sample and ~58%
+post-publication. The metadata carries `SampleEndYear` and publication `Year`,
+so each anomaly can be split into three eras without any judgement calls:
+
+    in-sample        up to SampleEndYear
+    out-of-sample    SampleEndYear -> publication Year
+    post-publication after publication Year
+
+**Pre-registered expectation:** monotone decline across the three eras.
+
+**Action:** whatever survives step 3 is re-ranked on **post-publication
+returns only**. An anomaly that worked before its paper and not after is not a
+candidate, however good its full-sample t-stat.
+
+## Step 5 — cost breakeven, before any strategy is built
+
+For each surviving anomaly compute the round-trip cost that reduces its
+post-publication return to zero, given its rebalance period.
+
+Then compare against realistic retail costs by liquidity tier:
+
+    large cap       ~1-5 bps      spread plus commission
+    mid cap         ~10-25 bps
+    microcap        ~100-300 bps  where the anomalies actually live
+
+**Pre-registered rule:** an anomaly is a candidate only if its breakeven cost
+exceeds **3x** the realistic cost of its tier. Not 1x — cost estimates in this
+project have been wrong three times, always optimistically, and a 3x margin is
+the minimum that survives being wrong again.
+
+## Step 6 — the retail question, only if anything reaches it
+
+HXZ dismiss microcap anomalies as untradeable **at institutional size**. A
+retail account is small enough that capacity is not the binding constraint;
+spread is. Whether that changes the answer is genuinely open.
+
+Only run this if step 5 produces candidates. If it does not, the honest
+conclusion is that published cross-sectional anomalies are not accessible to a
+retail account, and that is a complete answer to the question this project
+started with.
+
+## Stopping rule
+
+The programme ends, with the conclusion "no retail-accessible edge in
+published cross-sectional anomalies", if **either**:
+
+- step 3 closes the price-only avenue and no fundamental data is bought, **or**
+- step 5 produces no anomaly with a 3x cost margin.
+
+Substituting a different universe, weighting scheme or signal family and
+re-running is **not** a response to either outcome.
 
 ## Standing rules carried forward
 
-- Benchmark is the thing you would otherwise hold, never SPY by default.
-- Controls run every time, not when someone is suspicious.
-- State the cost assumption before the result and check it against the
-  instrument.
+- Benchmark is what you would otherwise hold, never SPY by default.
+- State the cost assumption before the result, and check it against the
+  instrument being traded.
 - Report the census, never select on the holdout.
+- A result that has not survived a positive control is not a result.
